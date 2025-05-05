@@ -53,31 +53,51 @@
             position: fixed;
             top: 20px;
             right: 20px;
-            width: 300px;
+            width: 250px;
             background: white;
-            padding: 15px;
+            padding: 10px;
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
             z-index: 1000;
+            max-height: 80vh;
+            overflow-y: auto;
         }
         .order-item {
-            margin-bottom: 10px;
-            padding: 10px;
+            margin-bottom: 8px;
+            padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .order-item:hover {
+            background: #e9ecef;
+            transform: translateX(-5px);
         }
         .order-status {
             font-weight: bold;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
+            font-size: 0.9em;
         }
         .order-details {
-            font-size: 0.9em;
+            font-size: 0.8em;
             color: #666;
+            display: none; /* Hide details by default */
+        }
+        .order-item.expanded .order-details {
+            display: block; /* Show details when expanded */
         }
         .eta {
             color: #2196F3;
             font-weight: bold;
+            font-size: 0.9em;
         }
+        .status-pending { color: #FFC107; }
+        .status-assigned { color: #2196F3; }
+        .status-picked-up { color: #4CAF50; }
+        .status-in-transit { color: #9C27B0; }
+        .status-delivered { color: #607D8B; }
         .client-marker-container {
             width: 20px;
             height: 20px;
@@ -469,21 +489,23 @@
             }
             
             const driverInfo = order.driver ? 
-                `<div>Assigned Driver: ${order.driver.name}</div>
-                 <div>Driver Location: [${order.driver.location.coordinates[1].toFixed(4)}, ${order.driver.location.coordinates[0].toFixed(4)}]</div>` : 
+                `<div>Driver: ${order.driver.name}</div>` : 
                 '<div>No driver assigned</div>';
             
             orderElement.innerHTML = `
                 <div class="order-status ${statusClass}">Order ${order._id} - ${order.status}</div>
                 <div class="order-details">
                     <div>Restaurant: ${order.restaurant.name}</div>
-                    <div>Restaurant Location: [${order.restaurant.location.coordinates[1].toFixed(4)}, ${order.restaurant.location.coordinates[0].toFixed(4)}]</div>
                     <div>Customer: ${order.customer.name}</div>
-                    <div>Customer Location: [${order.customer.location.coordinates[1].toFixed(4)}, ${order.customer.location.coordinates[0].toFixed(4)}]</div>
                     ${driverInfo}
                     ${order.estimatedDeliveryTime ? `<div class="eta">ETA: ${new Date(order.estimatedDeliveryTime).toLocaleTimeString()}</div>` : ''}
                 </div>
             `;
+            
+            // Add click handler to toggle details
+            orderElement.addEventListener('click', () => {
+                orderElement.classList.toggle('expanded');
+            });
             
             ordersList.appendChild(orderElement);
         }
