@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Delivery Driver Tracking - Sidi Bel Abbès</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        #map {
+            height: 600px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .driver-marker {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #4CAF50;
+            border: 2px solid white;
+        }
+        .busy {
+            background-color: #FF5722;
+        }
+        .offline {
+            background-color: #9E9E9E;
+        }
+        .legend {
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            margin-right: 10px;
+            border: 2px solid white;
+        }
+        .available { background-color: #4CAF50; }
+        .busy { background-color: #FF5722; }
+        .offline { background-color: #9E9E9E; }
+        .order-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .order-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .order-status {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .order-details {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .eta {
+            color: #2196F3;
+            font-weight: bold;
+        }
+        .client-marker-container {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #2196F3;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .client-marker {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #2196F3;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .restaurant-marker-container {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #FFC107;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .restaurant-marker {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background-color: #FFC107;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Delivery Driver Tracking - Sidi Bel Abbès</h1>
+    <div id="map"></div>
+    <div class="legend">
+        <h3>Driver Status</h3>
+        <div class="legend-item">
+            <div class="legend-color available"></div>
+            <span>Available</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color busy"></div>
+            <span>Busy</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color offline"></div>
+            <span>Offline</span>
+        </div>
+    </div>
+    <div class="order-panel">
+        <h3>Active Orders</h3>
+        <div id="orders-list"></div>
+        <div class="restaurant-selection" style="margin-top: 15px; margin-bottom: 15px;">
+            <h4>Select Restaurant:</h4>
+            <select id="restaurant-select" style="width: 100%; padding: 8px; margin-bottom: 10px;">
+                <!-- Will be populated from the server -->
+            </select>
+        </div>
+        <button onclick="createTestOrder()">Create Test Order</button>
+        <button onclick="resetDriverStatuses()" style="margin-top: 10px; background-color: #f44336;">Reset Driver Statuses</button>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        // Initialize map centered on Sidi Bel Abbès
+        const map = L.map('map').setView([35.1992, -0.6306], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: ' OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Connect to WebSocket
+        const socket = io('http://localhost:3000');
+        const driverMarkers = {};
+        const orders = {};
+        const clientMarkers = {};
+        const restaurantMarkers = {};
+
+        // Add styles for all markers
+        const style = document.createElement('style');
+        style.textContent = `
+            .driver-marker-container {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #4CAF50;
+                border: 2px solid white;
+            }
+            .driver-marker {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #4CAF50;
+                border: 2px solid white;
+            }
+            .busy {
+                background-color: #FF5722;
+            }
+            .offline {
+                background-color: #9E9E9E;
+            }
+            .client-marker-container {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #2196F3;
+                border: 2px solid white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+            }
+            .client-marker {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #2196F3;
+                border: 2px solid white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+            }
+            .restaurant-marker-container {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #FFC107;
+                border: 2px solid white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+            }
+            .restaurant-marker {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background-color: #FFC107;
+                border: 2px solid white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Handle driver location updates
+        socket.on('driverLocationUpdate', (data) => {
+            const { driverId, location, status, name, orderId, estimatedTime } = data;
+            console.log('Driver update received:', { driverId, status, name, estimatedTime });
+            
+            // Update existing marker or create new one
+            if (driverMarkers[driverId]) {
+                driverMarkers[driverId].setLatLng([location.coordinates[1], location.coordinates[0]]);
+                
+                // Update marker style based on status
+                const markerElement = driverMarkers[driverId].getElement();
+                if (markerElement) {
+                    // Find the inner div with the driver-marker class
+                    const innerMarker = markerElement.querySelector('.driver-marker');
+                    if (innerMarker) {
+                        // Remove all status classes
+                        innerMarker.classList.remove('available', 'busy', 'offline');
+                        // Add the current status class
+                        innerMarker.classList.add(status);
+                    }
+                }
+                
+                // Update popup content
+                let popupContent = `
+                    <div style="font-weight: bold;">Driver: ${name}</div>
+                    <div>Status: ${status}</div>
+                `;
+                if (orderId) {
+                    popupContent += `
+                        <div>Order: ${orderId}</div>
+                        <div>ETA: ${estimatedTime || 'Calculating...'} minutes</div>
+                    `;
+                }
+                driverMarkers[driverId].setPopupContent(popupContent);
+            } else {
+                const marker = L.marker([location.coordinates[1], location.coordinates[0]], {
+                    icon: L.divIcon({
+                        className: 'driver-marker-container',
+                        html: `<div class="driver-marker ${status}"></div>`
+                    })
+                }).addTo(map);
+                
+                let popupContent = `
+                    <div style="font-weight: bold;">Driver: ${name}</div>
+                    <div>Status: ${status}</div>
+                `;
+                if (orderId) {
+                    popupContent += `
+                        <div>Order: ${orderId}</div>
+                        <div>ETA: ${estimatedTime || 'Calculating...'} minutes</div>
+                    `;
+                }
+                marker.bindPopup(popupContent);
+                driverMarkers[driverId] = marker;
+            }
+        });
+
+        // Handle order updates
+        socket.on('orderStatusUpdate', (data) => {
+            updateOrderDisplay(data);
+            
+            // Update client markers
+            if (data.customer && data.customer.location) {
+                const customerId = data._id;
+                const [lng, lat] = data.customer.location.coordinates;
+                
+                if (clientMarkers[customerId]) {
+                    clientMarkers[customerId].setLatLng([lat, lng]);
+                } else {
+                    const marker = L.marker([lat, lng], {
+                        icon: L.divIcon({
+                            className: 'client-marker-container',
+                            html: `<div class="client-marker">C</div>`
+                        })
+                    }).addTo(map);
+                    marker.bindPopup(`Customer: ${data.customer.name}`);
+                    clientMarkers[customerId] = marker;
+                }
+            }
+
+            // Update restaurant markers
+            if (data.restaurant && data.restaurant.location) {
+                const restaurantId = data._id;
+                const [lng, lat] = data.restaurant.location.coordinates;
+                
+                if (restaurantMarkers[restaurantId]) {
+                    restaurantMarkers[restaurantId].setLatLng([lat, lng]);
+                } else {
+                    const marker = L.marker([lat, lng], {
+                        icon: L.divIcon({
+                            className: 'restaurant-marker-container',
+                            html: `<div class="restaurant-marker">R</div>`
+                        })
+                    }).addTo(map);
+                    marker.bindPopup(`Restaurant: ${data.restaurant.name}`);
+                    restaurantMarkers[restaurantId] = marker;
+                }
+            }
+        });
+
+        // Store all active routes
+        const activeRoutes = {};
+
+        // Handle order assignment with route information
+        socket.on('orderAssigned', (data) => {
+            const { orderId, driverId, route, estimatedTime } = data;
+            
+            // Generate a random color for this route
+            const colors = ['#4CAF50', '#2196F3', '#FFC107', '#9C27B0', '#FF5722'];
+            const color = colors[Object.keys(activeRoutes).length % colors.length];
+            
+            // Add the new route to the map
+            const routeLayer = L.geoJSON(route, {
+                style: {
+                    color: color,
+                    weight: 5,
+                    opacity: 0.7
+                }
+            }).addTo(map);
+
+            // Store the route with its color
+            activeRoutes[orderId] = {
+                layer: routeLayer,
+                color: color,
+                driverId: driverId
+            };
+
+            // Update driver marker with route information and status
+            if (driverMarkers[driverId]) {
+                const marker = driverMarkers[driverId];
+                const markerElement = marker.getElement();
+                if (markerElement) {
+                    const innerMarker = markerElement.querySelector('.driver-marker');
+                    if (innerMarker) {
+                        innerMarker.classList.remove('available', 'busy', 'offline');
+                        innerMarker.classList.add('busy');
+                    }
+                }
+                marker.bindPopup(`
+                    <div style="font-weight: bold;">Driver: ${marker.getPopup().getContent().split('<br>')[0].split(': ')[1]}</div>
+                    <div>Status: Busy</div>
+                    <div>Order: ${orderId}</div>
+                    <div>ETA: ${estimatedTime} minutes</div>
+                `);
+            }
+
+            // Update the legend to show all active routes
+            updateRouteLegend();
+        });
+
+        // Handle order completion
+        socket.on('orderCompleted', (data) => {
+            const { orderId } = data;
+            
+            // Remove the route if it exists
+            if (activeRoutes[orderId]) {
+                map.removeLayer(activeRoutes[orderId].layer);
+                delete activeRoutes[orderId];
+                
+                // Update the legend
+                updateRouteLegend();
+            }
+        });
+
+        function updateRouteLegend() {
+            // Remove existing route legend if it exists
+            if (window.routeLegend) {
+                map.removeControl(window.routeLegend);
+            }
+
+            // Create new route legend
+            window.routeLegend = L.control({ position: 'bottomleft' });
+            window.routeLegend.onAdd = function (map) {
+                const div = L.DomUtil.create('div', 'info legend');
+                let html = '<h4>Active Routes</h4>';
+                
+                Object.entries(activeRoutes).forEach(([orderId, route]) => {
+                    html += `
+                        <div style="display: flex; align-items: center; margin: 5px 0;">
+                            <div style="width: 20px; height: 5px; background-color: ${route.color}; margin-right: 10px;"></div>
+                            <span>Order ${orderId}</span>
+                        </div>
+                    `;
+                });
+                
+                div.innerHTML = html;
+                return div;
+            };
+            
+            window.routeLegend.addTo(map);
+        }
+
+        function updateMarkerStyle(marker, status) {
+            const markerElement = marker.getElement();
+            if (markerElement) {
+                const innerMarker = markerElement.querySelector('.driver-marker');
+                if (innerMarker) {
+                    // Remove all status classes
+                    innerMarker.classList.remove('available', 'busy', 'offline');
+                    // Add the current status class
+                    innerMarker.classList.add(status);
+                }
+            }
+        }
+
+        function updateOrderDisplay(order) {
+            const ordersList = document.getElementById('orders-list');
+            const orderElement = document.createElement('div');
+            orderElement.className = 'order-item';
+            orderElement.id = `order-${order._id}`;
+            
+            let statusClass = '';
+            switch (order.status) {
+                case 'pending': statusClass = 'status-pending'; break;
+                case 'assigned': statusClass = 'status-assigned'; break;
+                case 'picked_up': statusClass = 'status-picked-up'; break;
+                case 'in_transit': statusClass = 'status-in-transit'; break;
+                case 'delivered': statusClass = 'status-delivered'; break;
+            }
+            
+            const driverInfo = order.driver ? 
+                `<div>Assigned Driver: ${order.driver.name}</div>
+                 <div>Driver Location: [${order.driver.location.coordinates[1].toFixed(4)}, ${order.driver.location.coordinates[0].toFixed(4)}]</div>` : 
+                '<div>No driver assigned</div>';
+            
+            orderElement.innerHTML = `
+                <div class="order-status ${statusClass}">Order ${order._id} - ${order.status}</div>
+                <div class="order-details">
+                    <div>Restaurant: ${order.restaurant.name}</div>
+                    <div>Restaurant Location: [${order.restaurant.location.coordinates[1].toFixed(4)}, ${order.restaurant.location.coordinates[0].toFixed(4)}]</div>
+                    <div>Customer: ${order.customer.name}</div>
+                    <div>Customer Location: [${order.customer.location.coordinates[1].toFixed(4)}, ${order.customer.location.coordinates[0].toFixed(4)}]</div>
+                    ${driverInfo}
+                    ${order.estimatedDeliveryTime ? `<div class="eta">ETA: ${new Date(order.estimatedDeliveryTime).toLocaleTimeString()}</div>` : ''}
+                </div>
+            `;
+            
+            ordersList.appendChild(orderElement);
+        }
+
+        // Create a test order
+        // Fetch restaurants from the server
+        async function fetchRestaurants() {
+            try {
+                const response = await fetch('http://localhost:3000/api/restaurants');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch restaurants');
+                }
+                
+                const restaurants = await response.json();
+                const selectElement = document.getElementById('restaurant-select');
+                selectElement.innerHTML = '';
+                
+                restaurants.forEach(restaurant => {
+                    const option = document.createElement('option');
+                    option.value = restaurant.id;
+                    option.textContent = `${restaurant.name} - ${restaurant.cuisine} (${restaurant.rating}★)`;
+                    option.dataset.restaurant = JSON.stringify(restaurant);
+                    selectElement.appendChild(option);
+                });
+                
+                // Add restaurant markers to the map
+                restaurants.forEach(restaurant => {
+                    const marker = L.marker([restaurant.location.coordinates[1], restaurant.location.coordinates[0]], {
+                        icon: L.divIcon({
+                            className: 'restaurant-marker-container',
+                            html: `<div class="restaurant-marker">R</div>`
+                        })
+                    }).addTo(map);
+                    
+                    marker.bindPopup(`
+                        <div style="font-weight: bold;">${restaurant.name}</div>
+                        <div>${restaurant.cuisine} - ${restaurant.rating}★</div>
+                        <div>${restaurant.description}</div>
+                        <div>${restaurant.address}</div>
+                    `);
+                });
+            } catch (error) {
+                console.error('Error fetching restaurants:', error);
+            }
+        }
+        
+        // Fetch restaurants when the page loads
+        fetchRestaurants();
+        
+        async function createTestOrder() {
+            try {
+                console.log('Starting createTestOrder function');
+                // Generate a random order ID
+                const orderId = 'ORD-' + Math.floor(Math.random() * 10000);
+                
+                // Get the selected restaurant
+                const selectElement = document.getElementById('restaurant-select');
+                const selectedOption = selectElement.options[selectElement.selectedIndex];
+                
+                if (!selectedOption) {
+                    alert('Please select a restaurant');
+                    return;
+                }
+                
+                const restaurant = JSON.parse(selectedOption.dataset.restaurant);
+                
+                // Generate a random customer location around Sidi Bel Abbès
+                const custLng = -0.6306 + (Math.random() - 0.5) * 0.05;
+                const custLat = 35.1992 + (Math.random() - 0.5) * 0.05;
+                
+                // Random customer names
+                const customerNames = ['Mohammed', 'Fatima', 'Ahmed', 'Sara', 'Youssef', 'Amina'];
+                const randomCustomer = customerNames[Math.floor(Math.random() * customerNames.length)];
+                
+                console.log('Creating order with:', {
+                    orderId,
+                    restaurant,
+                    customer: {
+                        name: randomCustomer,
+                        location: [custLng, custLat]
+                    }
+                });
+                
+                // Create order
+                const response = await fetch('http://localhost:3000/api/orders', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        orderId: orderId,
+                        restaurant: {
+                            id: restaurant.id,
+                            name: restaurant.name,
+                            location: {
+                                type: 'Point',
+                                coordinates: restaurant.location.coordinates
+                            }
+                        },
+                        customer: {
+                            name: randomCustomer,
+                            location: {
+                                coordinates: [custLng, custLat]
+                            }
+                        }
+                    }),
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(error.message || 'Failed to create order');
+                    return;
+                }
+                
+                const order = await response.json();
+                console.log('Order created successfully:', order);
+                
+                // Add customer marker
+                const customerMarker = L.marker([custLat, custLng], {
+                    icon: L.divIcon({
+                        className: 'client-marker-container',
+                        html: `<div class="client-marker">C</div>`
+                    })
+                }).addTo(map);
+                customerMarker.bindPopup(`
+                    <div style="font-weight: bold;">Customer: ${order.customer.name}</div>
+                    <div>Location: [${custLat.toFixed(4)}, ${custLng.toFixed(4)}]</div>
+                `);
+                clientMarkers[order._id] = customerMarker;
+                
+                // Get restaurant coordinates from the order
+                const [restLng, restLat] = order.restaurant.location.coordinates;
+                
+                // Add restaurant marker
+                const restaurantMarker = L.marker([restLat, restLng], {
+                    icon: L.divIcon({
+                        className: 'restaurant-marker-container',
+                        html: `<div class="restaurant-marker">R</div>`
+                    })
+                }).addTo(map);
+                restaurantMarker.bindPopup(`
+                    <div style="font-weight: bold;">Restaurant: ${order.restaurant.name}</div>
+                    <div>Location: [${restLat.toFixed(4)}, ${restLng.toFixed(4)}]</div>
+                `);
+                restaurantMarkers[order._id] = restaurantMarker;
+                
+                console.log('Markers added to map, waiting for orderAssigned event');
+                
+            } catch (error) {
+                console.error('Error in createTestOrder:', error);
+                alert('Failed to create order. Please try again.');
+            }
+        }
+
+        // Reset all driver statuses
+        async function resetDriverStatuses() {
+            try {
+                const response = await fetch('http://localhost:3000/api/orders/reset-drivers', {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(error.message || 'Failed to reset driver statuses');
+                    return;
+                }
+
+                // Refresh the page to show updated driver statuses
+                location.reload();
+            } catch (error) {
+                console.error('Error resetting driver statuses:', error);
+                alert('Failed to reset driver statuses. Please try again.');
+            }
+        }
+
+        // Fetch initial driver locations
+        fetch('http://localhost:3000/api/drivers')
+            .then(response => response.json())
+            .then(drivers => {
+                drivers.forEach(driver => {
+                    if (driver.location && driver.location.coordinates) {
+                        const marker = L.marker([driver.location.coordinates[1], driver.location.coordinates[0]], {
+                            icon: L.divIcon({
+                                className: 'driver-marker-container',
+                                html: `<div class="driver-marker ${driver.status}"></div>`
+                            })
+                        }).addTo(map);
+                        
+                        marker.bindPopup(`Driver: ${driver.name}<br>Status: ${driver.status}`);
+                        driverMarkers[driver._id] = marker;
+                    }
+                });
+            });
+
+        // Fetch active orders
+        fetch('http://localhost:3000/api/orders')
+            .then(response => response.json())
+            .then(orders => {
+                orders.forEach(order => {
+                    updateOrderDisplay(order);
+                });
+            });
+
+        // Add legend for all markers
+        const legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function (map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.innerHTML = `
+                <h4>Locations</h4>
+                <div style="display: flex; align-items: center; margin: 5px 0;">
+                    <div class="driver-marker available" style="margin-right: 10px;"></div>
+                    <span>Available Driver</span>
+                </div>
+                <div style="display: flex; align-items: center; margin: 5px 0;">
+                    <div class="driver-marker busy" style="margin-right: 10px;"></div>
+                    <span>Busy Driver</span>
+                </div>
+                <div style="display: flex; align-items: center; margin: 5px 0;">
+                    <div class="client-marker" style="margin-right: 10px;">C</div>
+                    <span>Customer</span>
+                </div>
+                <div style="display: flex; align-items: center; margin: 5px 0;">
+                    <div class="restaurant-marker" style="margin-right: 10px;">R</div>
+                    <span>Restaurant</span>
+                </div>
+            `;
+            return div;
+        };
+        legend.addTo(map);
+    </script>
+</body>
+</html> 
